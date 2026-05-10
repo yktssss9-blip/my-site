@@ -3,7 +3,7 @@ import { getItinerary, updateItinerary } from "@/lib/itineraries";
 
 export async function GET(request, { params }) {
   const { id } = await params;
-  const itinerary = getItinerary(id);
+  const itinerary = await getItinerary(id);
   if (!itinerary)
     return NextResponse.json({ error: "見つかりません" }, { status: 404 });
 
@@ -14,7 +14,7 @@ export async function GET(request, { params }) {
 export async function PUT(request, { params }) {
   const { id } = await params;
   const body = await request.json();
-  const itinerary = getItinerary(id);
+  const itinerary = await getItinerary(id);
 
   if (!itinerary)
     return NextResponse.json({ error: "見つかりません" }, { status: 404 });
@@ -22,7 +22,7 @@ export async function PUT(request, { params }) {
     return NextResponse.json({ error: "権限がありません" }, { status: 401 });
 
   const { editToken, id: _id, createdAt, ...updates } = body;
-  updateItinerary(id, updates);
+  await updateItinerary(id, updates);
 
   return NextResponse.json({ ok: true });
 }

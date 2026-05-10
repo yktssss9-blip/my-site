@@ -25,7 +25,7 @@ export async function POST(request) {
   const id = randomBytes(6).toString("hex");
   const editToken = randomBytes(16).toString("hex");
 
-  createItinerary({
+  await createItinerary({
     id,
     editToken,
     title,
@@ -34,6 +34,13 @@ export async function POST(request) {
     endDate,
     description: description ?? "",
     days: generateDays(startDate, endDate),
+    sharedInfo: {
+      accommodation: "",
+      transports: [],
+      meetingPlace: "",
+      meetingTime: "",
+      items: [],
+    },
     createdAt: new Date().toISOString(),
   });
 
