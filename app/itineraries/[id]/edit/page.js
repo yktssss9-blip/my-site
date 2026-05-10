@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -204,6 +204,7 @@ function DroppableDay({ id, children }) {
 function EditContent() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const id = params.id;
   const token = searchParams.get("token") ?? "";
 
@@ -214,7 +215,9 @@ function EditContent() {
   const [unauthorized, setUnauthorized] = useState(false);
   const [uploadingSpotId, setUploadingSpotId] = useState(null);
   const [draggingSpot, setDraggingSpot] = useState(null);
+  const [isDirty, setIsDirty] = useState(false);
   const fileInputRefs = useRef({});
+  const isLoaded = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -232,6 +235,24 @@ function EditContent() {
       .catch(() => setError("読み込みに失敗しました"));
   }, [id, token]);
 
+  // 初回ロード後の変更を検知して isDirty をセット
+  useEffect(() => {
+    if (!itinerary) return;
+    if (!isLoaded.current) { isLoaded.current = true; return; }
+    setIsDirty(true);
+  }, [itinerary]);
+
+  // 未保存の変更があるときにブラウザ離脱を警告
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
   async function handleSave() {
     setSaving(true);
     setError("");
@@ -243,8 +264,8 @@ function EditContent() {
       });
       if (res.status === 401) { setUnauthorized(true); setSaving(false); return; }
       if (!res.ok) throw new Error();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setIsDirty(false);
+      router.push(`/itineraries/${id}`);
     } catch {
       setError("保存に失敗しました");
     } finally {
@@ -254,6 +275,78 @@ function EditContent() {
 
   function updateField(field, value) {
     setItinerary((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function updateSharedInfo(field, value) {
+    setItinerary((prev) => ({
+      ...prev,
+      sharedInfo: { ...(prev.sharedInfo ?? {}), [field]: value },
+    }));
+  }
+
+  function addItem() {
+    setItinerary((prev) => ({
+      ...prev,
+      sharedInfo: {
+        ...(prev.sharedInfo ?? {}),
+        items: [...(prev.sharedInfo?.items ?? []), ""],
+      },
+    }));
+  }
+
+  function updateItem(index, value) {
+    setItinerary((prev) => ({
+      ...prev,
+      sharedInfo: {
+        ...(prev.sharedInfo ?? {}),
+        items: prev.sharedInfo.items.map((item, i) => (i === index ? value : item)),
+      },
+    }));
+  }
+
+  function removeItem(index) {
+    setItinerary((prev) => ({
+      ...prev,
+      sharedInfo: {
+        ...(prev.sharedInfo ?? {}),
+        items: prev.sharedInfo.items.filter((_, i) => i !== index),
+      },
+    }));
+  }
+
+  function addTransport() {
+    setItinerary((prev) => ({
+      ...prev,
+      sharedInfo: {
+        ...(prev.sharedInfo ?? {}),
+        transports: [
+          ...(prev.sharedInfo?.transports ?? []),
+          { id: generateId(), type: "新幹線", name: "", date: "", from: "", departureTime: "", to: "", arrivalTime: "" },
+        ],
+      },
+    }));
+  }
+
+  function updateTransport(tid, field, value) {
+    setItinerary((prev) => ({
+      ...prev,
+      sharedInfo: {
+        ...(prev.sharedInfo ?? {}),
+        transports: prev.sharedInfo.transports.map((t) =>
+          t.id === tid ? { ...t, [field]: value } : t
+        ),
+      },
+    }));
+  }
+
+  function removeTransport(tid) {
+    setItinerary((prev) => ({
+      ...prev,
+      sharedInfo: {
+        ...(prev.sharedInfo ?? {}),
+        transports: prev.sharedInfo.transports.filter((t) => t.id !== tid),
+      },
+    }));
   }
 
   function addSpot(dayIndex) {
@@ -426,22 +519,33 @@ function EditContent() {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const shareUrl = `${origin}/itineraries/${id}`;
   const editUrl = `${origin}/itineraries/${id}/edit?token=${token}`;
-  const saveLabel = saving ? "保存中..." : saved ? "保存しました ✓" : "保存する";
+  const saveLabel = saving ? "保存中..." : "保存する";
 
   return (
     <div className="min-h-screen bg-gray-50 py-6 sm:py-10 px-4 sm:px-6">
       <div className="max-w-2xl mx-auto space-y-6 sm:space-y-8">
 
         {/* ヘッダー */}
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">しおりを編集</h1>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="bg-indigo-600 text-white px-5 sm:px-6 py-2 rounded-full font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50 text-sm sm:text-base"
-          >
-            {saveLabel}
-          </button>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800 shrink-0">しおりを編集</h1>
+          <div className="flex items-center gap-3">
+            {isDirty && !saving && (
+              <span className="text-xs text-amber-500 font-medium hidden sm:block">
+                ● 未保存の変更があります
+              </span>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className={`text-white px-5 sm:px-6 py-2 rounded-full font-semibold transition-colors disabled:opacity-50 text-sm sm:text-base shrink-0 ${
+                isDirty && !saving
+                  ? "bg-amber-500 hover:bg-amber-600"
+                  : "bg-indigo-600 hover:bg-indigo-700"
+              }`}
+            >
+              {saveLabel}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -516,6 +620,154 @@ function EditContent() {
             />
           </div>
         </div>
+
+        {/* 共有事項 */}
+        {(() => {
+          const si = itinerary.sharedInfo ?? {};
+          return (
+            <div className="bg-white rounded-2xl shadow-sm p-4 sm:p-6 space-y-5">
+              <h2 className="font-semibold text-gray-700">📌 共有事項</h2>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">🏨 宿泊地</label>
+                <input
+                  type="text"
+                  value={si.accommodation ?? ""}
+                  onChange={(e) => updateSharedInfo("accommodation", e.target.value)}
+                  placeholder="例：京都タワーホテル"
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </div>
+
+              {/* 電車・飛行機 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-2">🚄 電車・飛行機</label>
+                <div className="space-y-3">
+                  {(si.transports ?? []).map((t) => (
+                    <div key={t.id} className="border border-gray-200 rounded-xl p-4 space-y-3">
+                      {/* 種別・便名・日付・削除 */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={t.type}
+                          onChange={(e) => updateTransport(t.id, "type", e.target.value)}
+                          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-700 shrink-0"
+                        >
+                          {["新幹線","飛行機","特急","在来線","バス","フェリー","その他"].map((type) => (
+                            <option key={type} value={type}>{type}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="text"
+                          value={t.name}
+                          onChange={(e) => updateTransport(t.id, "name", e.target.value)}
+                          placeholder="便名（例：のぞみ13号）"
+                          className="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-700"
+                        />
+                        <input
+                          type="date"
+                          value={t.date ?? ""}
+                          onChange={(e) => updateTransport(t.id, "date", e.target.value)}
+                          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-700 shrink-0"
+                        />
+                        <button
+                          onClick={() => removeTransport(t.id)}
+                          className="text-gray-300 hover:text-red-400 transition-colors shrink-0"
+                          aria-label="削除"
+                        >✕</button>
+                      </div>
+                      {/* 出発→到着 */}
+                      <div className="grid grid-cols-2 sm:grid-cols-[1fr_auto_auto_1fr_auto] gap-2 items-center">
+                        <input
+                          type="text"
+                          value={t.from}
+                          onChange={(e) => updateTransport(t.id, "from", e.target.value)}
+                          placeholder="出発地"
+                          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-700"
+                        />
+                        <input
+                          type="time"
+                          value={t.departureTime}
+                          onChange={(e) => updateTransport(t.id, "departureTime", e.target.value)}
+                          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-700"
+                        />
+                        <span className="text-gray-400 text-center hidden sm:block">→</span>
+                        <input
+                          type="text"
+                          value={t.to}
+                          onChange={(e) => updateTransport(t.id, "to", e.target.value)}
+                          placeholder="到着地"
+                          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-700"
+                        />
+                        <input
+                          type="time"
+                          value={t.arrivalTime}
+                          onChange={(e) => updateTransport(t.id, "arrivalTime", e.target.value)}
+                          className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-gray-700"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={addTransport}
+                  className="mt-3 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  ＋ 交通手段を追加
+                </button>
+              </div>
+
+              {/* 集合場所・時間 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">📍 集合場所・時間</label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={si.meetingPlace ?? ""}
+                    onChange={(e) => updateSharedInfo("meetingPlace", e.target.value)}
+                    placeholder="例：東京駅 八重洲北口"
+                    className="flex-1 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                  <input
+                    type="time"
+                    value={si.meetingTime ?? ""}
+                    onChange={(e) => updateSharedInfo("meetingTime", e.target.value)}
+                    className="border border-gray-200 rounded-lg px-4 py-2.5 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 sm:w-36"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-2">🎒 持ち物</label>
+                <div className="space-y-2">
+                  {(si.items ?? []).map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={item}
+                        onChange={(e) => updateItem(i, e.target.value)}
+                        placeholder="例：パスポート"
+                        className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      />
+                      <button
+                        onClick={() => removeItem(i)}
+                        className="text-gray-300 hover:text-red-400 transition-colors shrink-0"
+                        aria-label="削除"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={addItem}
+                  className="mt-3 text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+                >
+                  ＋ 持ち物を追加
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* スケジュール（DnD） */}
         <DndContext
@@ -603,11 +855,20 @@ function EditContent() {
         </DndContext>
 
         {/* 下部保存ボタン */}
-        <div className="flex justify-end pb-10">
+        <div className="flex flex-col items-end gap-2 pb-10">
+          {isDirty && !saving && (
+            <span className="text-xs text-amber-500 font-medium">
+              ● 未保存の変更があります
+            </span>
+          )}
           <button
             onClick={handleSave}
             disabled={saving}
-            className="bg-indigo-600 text-white px-8 py-3 rounded-full font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
+            className={`text-white px-8 py-3 rounded-full font-semibold transition-colors disabled:opacity-50 ${
+              isDirty && !saving
+                ? "bg-amber-500 hover:bg-amber-600"
+                : "bg-indigo-600 hover:bg-indigo-700"
+            }`}
           >
             {saveLabel}
           </button>
